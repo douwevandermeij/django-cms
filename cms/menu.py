@@ -413,7 +413,7 @@ class SoftRootCutter(Modifier):
         # if we found a selected ...
         if selected:
             # and the selected is a softroot
-            if selected.attr.get("soft_root", False):
+            if not root_id and selected.attr.get("soft_root", False):
                 # get it's descendants
                 nodes = selected.get_descendants()
                 # remove the link to parent
@@ -421,8 +421,9 @@ class SoftRootCutter(Modifier):
                 # make the selected page the root in the menu
                 nodes = [selected] + nodes
             else:
-                # if it's not a soft root, walk ancestors (upwards!)
-                nodes = self.find_ancestors_and_remove_children(selected, nodes)
+                # if it's not a soft root, or we want to show a menu below a
+                # particular id, walk ancestors (upwards!)
+                nodes = self.find_ancestors_and_remove_children(selected, nodes, root_id)
         return nodes
 
     def find_and_remove_children(self, node, nodes):
@@ -437,12 +438,12 @@ class SoftRootCutter(Modifier):
             self.remove_children(child, nodes)
         node.children = []
 
-    def find_ancestors_and_remove_children(self, node, nodes):
+    def find_ancestors_and_remove_children(self, node, nodes, root_id=None):
         """
         Check ancestors of node for soft roots
         """
         if node.parent:
-            if node.parent.attr.get("soft_root", False):
+            if not root_id and node.parent.attr.get("soft_root", False):
                 nodes = node.parent.get_descendants()
                 node.parent.parent = None
                 nodes = [node.parent] + nodes
