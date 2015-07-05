@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import with_statement
 import datetime
+from operator import attrgetter
 import re
 
 from django.contrib import admin
@@ -16,7 +17,8 @@ from django.utils.functional import lazy
 from django.utils.translation import ugettext_lazy as _, override
 
 from cms.api import create_page, create_title, add_plugin
-from cms.cms_toolbar import ADMIN_MENU_IDENTIFIER, ADMINISTRATION_BREAK, get_user_model
+from cms.cms_toolbar import (ADMIN_MENU_IDENTIFIER, ADMINISTRATION_BREAK, get_user_model,
+                             LANGUAGE_MENU_IDENTIFIER)
 from cms.middleware.toolbar import ToolbarMiddleware
 from cms.models import Page, UserSettings, PagePermission
 from cms.toolbar.items import (ToolbarAPIMixin, LinkItem, ItemSearchResult,
@@ -31,6 +33,7 @@ from cms.test_utils.testcases import (CMSTestCase,
                                       URL_CMS_PAGE_ADD, URL_CMS_PAGE_CHANGE)
 from cms.test_utils.util.context_managers import UserLoginContext
 from cms.utils.conf import get_cms_setting
+from cms.utils.i18n import get_language_tuple
 from cms.utils.urlutils import admin_reverse
 from cms.views import details
 
@@ -53,7 +56,8 @@ class ToolbarTestBase(CMSTestCase):
         request.current_page = page
         mid = ToolbarMiddleware()
         mid.process_request(request)
-        request.toolbar.populate()
+        if hasattr(request,'toolbar'):
+            request.toolbar.populate()
         return request
 
     def get_anon(self):
@@ -85,6 +89,36 @@ class ToolbarTestBase(CMSTestCase):
         session = self.client.session
         session['cms_log_latest'] = entry.pk
         session.save()
+
+
+@override_settings(ROOT_URLCONF='cms.test_utils.project.nonroot_urls')
+class ToolbarMiddlewareTest(ToolbarTestBase):
+
+    def test_no_app_setted_show_toolbar_in_non_cms_urls(self):
+        request = self.get_page_request(None, self.get_anon(), '/')
+        self.assertTrue(hasattr(request,'toolbar'))
+
+    def test_no_app_setted_show_toolbar_in_cms_urls(self):
+        page = create_page('foo','col_two.html','en',published=True)
+        request = self.get_page_request(page, self.get_anon())
+        self.assertTrue(hasattr(request,'toolbar'))
+
+    @override_settings(CMS_APP_NAME='cms')
+    def test_app_setted_hide_toolbar_in_non_cms_urls_toolbar_hide_unsetted(self):
+        request = self.get_page_request(None, self.get_anon(), '/')
+        self.assertTrue(hasattr(request,'toolbar'))
+
+    @override_settings(CMS_APP_NAME='cms')
+    @override_settings(CMS_TOOLBAR_HIDE=True)
+    def test_app_setted_hide_toolbar_in_non_cms_urls(self):
+        request = self.get_page_request(None, self.get_anon(), '/')
+        self.assertFalse(hasattr(request,'toolbar'))
+
+    @override_settings(CMS_APP_NAME='cms')
+    def test_app_setted_show_toolbar_in_cms_urls(self):
+        page = create_page('foo','col_two.html','en',published=True)
+        request = self.get_page_request(page, self.get_anon())
+        self.assertTrue(hasattr(request,'toolbar'))
 
 
 @override_settings(CMS_PERMISSION=False)
@@ -310,6 +344,13 @@ class ToolbarTests(ToolbarTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'cms_form-login')
 
+    @override_settings(CMS_TOOLBAR_ANONYMOUS_ON=False)
+    def test_hide_toolbar_login_anonymous_setting(self):
+        create_page("toolbar-page", "nav_playground.html", "en", published=True)
+        response = self.client.get('/en/?%s' % get_cms_setting('CMS_TOOLBAR_URL__EDIT_ON'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'cms_form-login')
+
     def test_hide_toolbar_login_nonstaff(self):
         create_page("toolbar-page", "nav_playground.html", "en", published=True)
         with self.login_user_context(self.get_nonstaff()):
@@ -404,6 +445,24 @@ class ToolbarTests(ToolbarTestBase):
         de_toolbar.post_template_populate()
         # Logo + templates + page-menu + admin-menu + logout
         self.assertEqual(len(de_toolbar.get_left_items() + de_toolbar.get_right_items()), 5)
+
+    def test_double_menus(self):
+        """
+        Tests that even called multiple times, admin and language buttons are not duplicated
+        """
+        user = self.get_staff()
+        en_request = self.get_page_request(None, user, edit=True, path='/')
+        toolbar = CMSToolbar(en_request)
+        toolbar.populated = False
+        toolbar.populate()
+        toolbar.populated = False
+        toolbar.populate()
+        toolbar.populated = False
+        toolbar.post_template_populate()
+        admin = toolbar.get_left_items()[0]
+        lang = toolbar.get_left_items()[1]
+        self.assertEqual(len(admin.get_items()), 9)
+        self.assertEqual(len(lang.get_items()), len(get_language_tuple(1)))
 
     @override_settings(CMS_PLACEHOLDER_CONF={'col_left': {'name': 'PPPP'}})
     def test_placeholder_name(self):
@@ -599,6 +658,46 @@ class ToolbarTests(ToolbarTestBase):
             # parameters - non existing id - no redirection
             response = self.client.post(url, {'pk': 9999, 'model': 'cms.page'})
             self.assertEqual(response.content.decode('utf-8'), '')
+
+    def test_remove_language(self):
+        item_name = attrgetter('name')
+
+        page = create_page("toolbar-page", "nav_playground.html", "en",
+                           published=True)
+        create_title(title="de page", language="de", page=page)
+        create_title(title="fr page", language="fr", page=page)
+
+        request = self.get_page_request(page, self.get_staff(), '/', edit=True)
+        toolbar = CMSToolbar(request)
+        toolbar.populate()
+        meu = toolbar.get_menu(LANGUAGE_MENU_IDENTIFIER)
+        self.assertTrue(any([item for item in meu.get_items() if hasattr(item, 'name') and item_name(item).startswith('Delete German')]))
+        self.assertTrue(any([item for item in meu.get_items() if hasattr(item, 'name') and item_name(item).startswith('Delete English')]))
+        self.assertTrue(any([item for item in meu.get_items() if hasattr(item, 'name') and item_name(item).startswith('Delete French')]))
+
+        reduced_langs = {
+            1: [
+                {
+                    'code': 'en',
+                    'name': 'English',
+                    'fallbacks': ['fr', 'de'],
+                    'public': True,
+                },
+                {
+                    'code': 'fr',
+                    'name': 'French',
+                    'public': True,
+                },
+            ]
+        }
+
+        with self.settings(CMS_LANGUAGES=reduced_langs):
+            toolbar = CMSToolbar(request)
+            toolbar.populate()
+            meu = toolbar.get_menu(LANGUAGE_MENU_IDENTIFIER)
+            self.assertFalse(any([item for item in meu.get_items() if hasattr(item, 'name') and item_name(item).startswith('Delete German')]))
+            self.assertTrue(any([item for item in meu.get_items() if hasattr(item, 'name') and item_name(item).startswith('Delete English')]))
+            self.assertTrue(any([item for item in meu.get_items() if hasattr(item, 'name') and item_name(item).startswith('Delete French')]))
 
     def get_username(self, user=None, default=''):
         user = user or self.request.user
@@ -1181,6 +1280,9 @@ class EditModelTemplateTagTest(ToolbarTestBase):
             response,
             '<div class="cms_plugin cms_plugin-%s-%s-changelist-%s cms_render_model cms_render_model_block">' % (
                 'placeholderapp', 'example1', ex1.pk))
+        self.assertContains(
+            response,
+            "'edit_plugin': '%s?language=%s&amp;edit_fields=changelist'" % (admin_reverse('placeholderapp_example1_changelist'), 'en'))
 
     def test_invalid_attribute(self):
         user = self.get_staff()
@@ -1565,7 +1667,9 @@ class EditModelTemplateTagTest(ToolbarTestBase):
         self.assertContains(
             response,
             '<div class="cms_plugin cms_plugin-cms-page-changelist-%s cms_render_model cms_render_model_block"><h3>Menu</h3></div>' % page.pk)
-
+        self.assertContains(
+            response,
+            "'edit_plugin': '%s?language=%s&amp;edit_fields=changelist'" % (admin_reverse('cms_page_changelist'), language))
 
 class CharPkFrontendPlaceholderAdminTest(ToolbarTestBase):
 

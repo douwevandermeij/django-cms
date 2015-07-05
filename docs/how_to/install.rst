@@ -22,12 +22,12 @@ Requirements
 ************
 
 * `Python`_ 2.6, 2.7, 3.3 or 3.4.
-* `Django`_ 1.4.5, 1.5.x, 1.6.x or 1.7.x
+* `Django`_ 1.6.x, 1.7.x, 1.8.x
 * `South`_ 1.0.1 or higher (Only required up to Django 1.6)
-* `django-classy-tags`_ 0.5 or higher
+* `django-classy-tags`_ 0.6.2 or higher
 * `django-treebeard`_ 3.0
-* `django-sekizai`_ 0.7 or higher
-* `html5lib`_ 0.99 or higher
+* `django-sekizai`_ 0.8.2 or higher
+* `html5lib`_ 0.99 or 0.999
 * `djangocms-admin-style`_
 * An installed and working instance of one of the databases listed in the
   `Databases`_ section.
@@ -67,6 +67,7 @@ Other Plugins
 * djangocms-grid
 * djangocms-oembed
 * djangocms-table
+* djangocms-flash
 
 
 File and image handling
@@ -147,10 +148,9 @@ its dependencies:
     # lock-in their version, specify them
     Django>=1.7
 
-    South==1.0.2 # Only needed for Django < 1.7
     django-treebeard==3.0
-    django-sekizai==0.7
-    django-classy-tags==0.5
+    django-sekizai==0.8.2
+    django-classy-tags==0.6.2
     djangocms-admin-style==0.2.2
     html5lib==0.999
     six==1.3.0
@@ -513,12 +513,12 @@ setting should look like::
 
 django CMS, as well as its plugins, supports both Django 1.7 and Django 1.6 migrations.
 
-Since version 3.1 migrations are stored in modules compatibiles with Django 1.7 **and**
+Since version 3.1, migrations are stored in modules compatible with Django 1.7 **and**
 South 1.0.2 without further configuration.
 
-django CMS are being ported to the same structure; in the meantime, on Django 1.7
-you may need to where the migrations are situated using the ``MIGRATION_MODULES``
-setting::
+django CMS plugins are being ported to the same structure; in the meantime,
+on Django 1.7, you may need to specify where the migrations are situated using the
+``MIGRATION_MODULES`` setting::
 
     MIGRATION_MODULES = {
         # Add also the following modules if you're using these plugins:

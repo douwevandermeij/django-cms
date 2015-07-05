@@ -1,12 +1,11 @@
+..  _contributing:
+
 ##########################
 Contributing to django CMS
 ##########################
 
 Like every open-source project, django CMS is always looking for motivated
 individuals to contribute to its source code.
-
-There's more guidance on `how to contribute in our documentation
-<http://docs.django-cms.org/en/latest/introduction>`_.
 
 
 Key points:
@@ -53,6 +52,8 @@ only for the stuff we host on GitHub:
 #. When you feel your code is good enough for inclusion, "send us a `pull
    request`_", by using the nice GitHub web interface.
 
+.. _contributing-code:
+
 *****************
 Contributing Code
 *****************
@@ -96,9 +97,9 @@ We try to conform to `PEP8`_ as much as possible. A few highlights:
 HTML, CSS and JavaScript
 ------------------------
 
-As of django CMS 3.1, we will use spaces within frontend code, not tabs as previously. In the
+As of django CMS 3.2, we will use spaces within frontend code, not tabs as previously. In the
 meantime, please continue using tabs - all tabs will be converted to spaces in a single commit
-for 3.1.
+for 3.2.
 
 Frontend code should be formatted for readability. If in doubt, follow existing examples, or ask.
 
@@ -125,6 +126,8 @@ that the fix works.
 We have an IRC channel, our `django-cms-developers`_ email list,
 and of course the code reviews mechanism on GitHub - do use them.
 
+.. _contributing-documentation:
+
 **************************
 Contributing Documentation
 **************************
@@ -139,12 +142,12 @@ your prose can be improved later if necessary.
 Documentation should be:
 
 - written using valid `Sphinx`_/`restructuredText`_ syntax (see below for
-  specifics) and the file extension should be ``.rst``
-- written in English (we have standardised on British spellings)
+  specifics); the file extension should be ``.rst``
+- wrapped at 100 characters per line
+- written in English, using British English spelling and punctuation
 - accessible - you should assume the reader to be moderately familiar with
   Python and Django, but not anything else. Link to documentation of libraries
   you use, for example, even if they are "obvious" to you
-- wrapped at 100 characters per line
 
 Merging documentation is pretty fast and painless.
 
@@ -174,17 +177,17 @@ Documentation structure
 
 Our documentation is divided into the following main sections:
 
-* :doc:`/introduction/index` (``introduction``): step-by-step tutorials to get
+* :doc:`/introduction/index` (``introduction``): step-by-step, beginning-to-end tutorials to get
   you up and running
-* :doc:`/how_to/index` (``how_to``): guides covering more advanced development
+* :doc:`/how_to/index` (``how_to``): step-by-step guides covering more advanced development
 * :doc:`/topics/index` (``topics``): explanations of key parts of the system
 * :doc:`/reference/index` (``reference``): technical reference for APIs, key
   models
   and so on
 * :doc:`/contributing/index` (``contributing``)
 * :doc:`/upgrade/index` (``upgrade``)
-* (in progress Using django CMS (``user``): guides for *using* rather than
-  setting up or developing for the CMS
+* :doc:`/user/index` (``user``): guides for *using* rather than setting up or developing for the
+  CMS
 
 
 Documentation markup
@@ -193,28 +196,61 @@ Documentation markup
 Sections
 --------
 
-We use Python documentation conventions for section marking:
+We mostly follow the Python documentation conventions for section marking::
 
-* ``#`` with overline, for parts
-* ``*`` with overline, for chapters
-* ``=`` for sections
-* ``-`` for subsections
-* ``^`` for subsubsections
-* ``"`` for paragraphs
+    ##########
+    Page title
+    ##########
+
+    *******
+    heading
+    *******
+
+    sub-heading
+    ===========
+
+    sub-sub-heading
+    ---------------
+
+    sub-sub-sub-heading
+    ^^^^^^^^^^^^^^^^^^^
+
+    sub-sub-sub-sub-heading
+    """""""""""""""""""""""
 
 Inline markup
 -------------
 
 * use backticks - `````` - for:
-    * literals - ````cms.models.pagemodel````
-    * filenames - ``edit ``settings.py````
-    * names of fields and other specific items in the Admin interface - ``edit ``Redirect````
+    * literals::
+
+        The ``cms.models.pagemodel`` contains several important methods.
+
+    * filenames::
+
+        Before you start, edit ``settings.py``.
+
+    * names of fields and other specific items in the Admin interface::
+
+        Edit the ``Redirect`` field.
+
 * use emphasis - ``*Home*`` - around:
-    * the names of available options in or parts of the Admin - ``the *Toolbar*``
-    * the names of important modes or states - ``switch to *Edit mode*``
-    * values in or of fields - ``enter *Home*``
+    * the names of available options in or parts of the Admin::
+
+        To hide and show the *Toolbar*, use the...
+
+    * the names of important modes or states::
+
+        ... in order to switch to *Edit mode*.
+
+    * values in or of fields::
+
+        Enter *Home* in the field.
+
 * use strong emphasis - ``**`` - around:
-    * buttons that perform an action - ``hit **Save and close**``
+    * buttons that perform an action::
+
+        Hit **Save as draft**.
 
 Rules for using technical words
 -------------------------------
@@ -234,9 +270,22 @@ Please follow these rules:
 References
 ----------
 
+Create::
+
+    .. _testing:
+
+and use::
+
+     :ref:`testing`
+
+internal cross-references liberally.
+
+
 Use absolute links to other documentation pages - ``:doc:`/how_to/toolbar``` -
 rather than relative links - ``:doc:`/../toolbar```. This makes it easier to
 run search-and-replaces when items are moved in the structure.
+
+.. _contributing-translations:
 
 ************
 Translations

@@ -16,7 +16,11 @@ from django.core.urlresolvers import resolve, Resolver404
 from django.http import HttpResponseRedirect, HttpResponse
 from django.middleware.csrf import get_token
 from django.utils.translation import ugettext_lazy as _
-from django.utils.datastructures import SortedDict
+
+try:
+    from collections import OrderedDict
+except ImportError:
+    from django.utils.datastructures import SortedDict as OrderedDict
 
 
 class CMSToolbarLoginForm(AuthenticationForm):
@@ -55,6 +59,7 @@ class CMSToolbar(ToolbarAPIMixin):
         self.clipboard = None
         self.language = None
         self.toolbar_language = None
+        self.simple_structure_mode = getattr(settings, 'CMS_TOOLBAR_SIMPLE_STRUCTURE_MODE', False)
         self.show_toolbar = True
         self.init_toolbar(request)
 
@@ -86,7 +91,7 @@ class CMSToolbar(ToolbarAPIMixin):
                 break
             parts.pop()
 
-        self.toolbars = SortedDict()
+        self.toolbars = OrderedDict()
         for key in toolbars:
             toolbar = toolbars[key](self.request, self, toolbars[key].check_current_app(key, self.app_name), self.app_name)
             self.toolbars[key] = toolbar
@@ -224,21 +229,23 @@ class CMSToolbar(ToolbarAPIMixin):
 
     def get_object_public_url(self):
         if self.obj:
-            try:
-                return self.obj.get_public_url()
-            except:
-                pass
+            with force_language(self.request.LANGUAGE_CODE):
+                try:
+                    return self.obj.get_public_url()
+                except:
+                    pass
         return ''
 
     def get_object_draft_url(self):
         if self.obj:
-            try:
-                return self.obj.get_draft_url()
-            except:
+            with force_language(self.request.LANGUAGE_CODE):
                 try:
-                    return self.obj.get_absolute_url()
+                    return self.obj.get_draft_url()
                 except:
-                    pass
+                    try:
+                        return self.obj.get_absolute_url()
+                    except:
+                        pass
         return ''
 
     # Internal API

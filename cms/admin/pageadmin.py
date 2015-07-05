@@ -3,6 +3,7 @@ import copy
 from functools import wraps
 import json
 import sys
+from cms.utils.compat import DJANGO_1_7
 
 import django
 from django.contrib.admin.helpers import AdminForm
@@ -18,8 +19,7 @@ from django.core.exceptions import PermissionDenied, ObjectDoesNotExist, Validat
 from django.db import router, transaction
 from django.db.models import Q
 from django.http import HttpResponseRedirect, HttpResponse, Http404, HttpResponseBadRequest, HttpResponseForbidden
-from django.shortcuts import render_to_response, get_object_or_404
-from django.template.context import RequestContext
+from django.shortcuts import render, get_object_or_404
 from django.template.defaultfilters import escape
 from django.utils.encoding import force_text
 from django.utils.six.moves.urllib.parse import unquote
@@ -676,7 +676,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             # the 'invalid=1' parameter was already in the query string, something
             # is screwed up with the database, so display an error page.
             if ERROR_FLAG in request.GET.keys():
-                return render_to_response('admin/invalid_setup.html', {'title': _('Database error')})
+                return render(request, 'admin/invalid_setup.html', {'title': _('Database error')})
             return HttpResponseRedirect(request.path_info + '?' + ERROR_FLAG + '=1')
         cl.set_items(request)
 
@@ -719,11 +719,11 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             context['has_recover_permission'] = self.has_recover_permission(request)
             context['has_change_permission'] = self.has_change_permission(request)
         context.update(extra_context or {})
-        return render_to_response(self.change_list_template or [
+        return render(request, self.change_list_template or [
             'admin/%s/%s/change_list.html' % (app_label, opts.object_name.lower()),
             'admin/%s/change_list.html' % app_label,
             'admin/change_list.html'
-        ], context, context_instance=RequestContext(request))
+        ], context)
 
     def recoverlist_view(self, request, extra_context=None):
         if not self.has_recover_permission(request):
@@ -823,6 +823,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             helpers.make_revision_with_plugins(page, request.user, message)
         return HttpResponse(force_text(_("The template was successfully changed")))
 
+    @require_POST
     @transaction.atomic
     def move_page(self, request, page_id, extra_context=None):
         """
@@ -882,7 +883,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             'page': page,
             'permission_set': permission_set,
         }
-        return render_to_response('admin/cms/page/permissions.html', context)
+        return render(request, 'admin/cms/page/permissions.html', context)
 
     @require_POST
     @transaction.atomic
@@ -908,6 +909,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
                 helpers.make_revision_with_plugins(page, request.user, message)
             return HttpResponse("ok")
 
+    @require_POST
     @transaction.atomic
     def copy_page(self, request, page_id, extra_context=None):
         """
@@ -941,6 +943,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
         context.update(extra_context or {})
         return HttpResponseRedirect('../../')
 
+    @require_POST
     @transaction.atomic
     @create_revision()
     def publish_page(self, request, page_id, language):
@@ -1041,6 +1044,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
                         revision.delete()
                         deleted.append(revision.pk)
 
+    @require_POST
     @transaction.atomic
     def unpublish(self, request, page_id, language):
         """
@@ -1076,6 +1080,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             path = "%s?language=%s&page_id=%s" % (path, request.GET.get('redirect_language'), request.GET.get('redirect_page_id'))
         return HttpResponseRedirect(path)
 
+    @require_POST
     @transaction.atomic
     def revert_page(self, request, page_id, language):
         page = get_object_or_404(Page, id=page_id)
@@ -1139,16 +1144,29 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             'user': request.user,
             'using': using
         }
-        deleted_objects, perms_needed = get_deleted_objects(
-            [titleobj],
-            titleopts,
-            **kwargs
-        )[:2]
-        to_delete_plugins, perms_needed_plugins = get_deleted_objects(
-            saved_plugins,
-            pluginopts,
-            **kwargs
-        )[:2]
+
+        if DJANGO_1_7:
+            deleted_objects, perms_needed = get_deleted_objects(
+                [titleobj],
+                titleopts,
+                **kwargs
+            )[:2]
+            to_delete_plugins, perms_needed_plugins = get_deleted_objects(
+                saved_plugins,
+                pluginopts,
+                **kwargs
+            )[:2]
+        else:
+            deleted_objects, __, perms_needed = get_deleted_objects(
+                [titleobj],
+                titleopts,
+                **kwargs
+            )[:3]
+            to_delete_plugins, __, perms_needed_plugins = get_deleted_objects(
+                saved_plugins,
+                pluginopts,
+                **kwargs
+            )[:3]
 
         deleted_objects.append(to_delete_plugins)
         perms_needed = set(list(perms_needed) + list(perms_needed_plugins))
@@ -1190,12 +1208,12 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             "app_label": app_label,
         }
         context.update(extra_context or {})
-        context_instance = RequestContext(request, current_app=self.admin_site.name)
-        return render_to_response(self.delete_confirmation_template or [
+        request.current_app = self.admin_site.name
+        return render(request, self.delete_confirmation_template or [
             "admin/%s/%s/delete_confirmation.html" % (app_label, titleopts.object_name.lower()),
             "admin/%s/delete_confirmation.html" % app_label,
             "admin/delete_confirmation.html"
-        ], context, context_instance=context_instance)
+        ], context)
 
     def preview_page(self, request, object_id, language):
         """Redirecting preview function based on draft_id
@@ -1211,6 +1229,7 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             page.site.domain, url)
         return HttpResponseRedirect(url)
 
+    @require_POST
     def change_innavigation(self, request, page_id):
         """
         Switch the in_navigation of a page
@@ -1362,10 +1381,10 @@ class PageAdmin(PlaceholderAdminMixin, ModelAdmin):
             context.update({
                 'cancel': True,
             })
-            return render_to_response('admin/cms/page/plugin/confirm_form.html', context, RequestContext(request))
+            return render(request, 'admin/cms/page/plugin/confirm_form.html', context)
         if not cancel_clicked and request.method == 'POST' and saved_successfully:
-            return render_to_response('admin/cms/page/plugin/confirm_form.html', context, RequestContext(request))
-        return render_to_response('admin/cms/page/plugin/change_form.html', context, RequestContext(request))
+            return render(request, 'admin/cms/page/plugin/confirm_form.html', context)
+        return render(request, 'admin/cms/page/plugin/change_form.html', context)
 
     def get_published_pagelist(self, *args, **kwargs):
         """

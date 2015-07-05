@@ -9,7 +9,7 @@ from djangocms_text_ckeditor.cms_plugins import TextPlugin
 from djangocms_text_ckeditor.models import Text
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry
-from django.contrib.admin.sites import site
+from django.contrib.admin.sites import site, AdminSite
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, AnonymousUser
 from django.contrib.sites.models import Site
@@ -37,7 +37,7 @@ from cms.test_utils import testcases as base
 from cms.test_utils.testcases import CMSTestCase, URL_CMS_PAGE_DELETE, URL_CMS_PAGE, URL_CMS_TRANSLATION_DELETE
 from cms.test_utils.util.fuzzy_int import FuzzyInt
 from cms.utils import get_cms_setting
-from cms.utils.compat import DJANGO_1_6
+from cms.utils.compat import DJANGO_1_6, DJANGO_1_7
 
 
 class AdminTestsBase(CMSTestCase):
@@ -355,6 +355,16 @@ class AdminTestCase(AdminTestsBase):
                 errmsg = response.content
                 self.assertEqual(response.status_code, 200, errmsg)
 
+    def test_pagetree_filtered(self):
+        superuser = self.get_superuser()
+        create_page("root-page", "nav_playground.html", "en",
+                    created_by=superuser, published=True)
+        with self.login_user_context(superuser):
+            url = admin_reverse('cms_page_changelist')
+            response = self.client.get('%s?template__exact=nav_playground.html' % url)
+            errmsg = response.content
+            self.assertEqual(response.status_code, 200, errmsg)
+
     def test_delete_translation(self):
         admin_user = self.get_superuser()
         page = create_page("delete-page-translation", "nav_playground.html", "en",
@@ -493,6 +503,64 @@ class AdminTestCase(AdminTestsBase):
         self.assertEqual(root_page.get_children()[0], second_level_page_top)
         self.assertEqual(root_page.get_children()[1], second_level_page_bottom)
         self.assertEqual(root_page.get_children()[0].get_children()[0], third_level_page)
+
+    def test_changelist_get_results(self):
+        admin_user = self.get_superuser()
+        first_level_page = create_page('level1', 'nav_playground.html', 'en', published=True)
+        second_level_page_top = create_page('level21', "nav_playground.html", "en",
+                                            created_by=admin_user, published=True,
+                                            parent=first_level_page)
+        second_level_page_bottom = create_page('level22', "nav_playground.html", "en", # nopyflakes
+                                               created_by=admin_user, published=True,
+                                               parent=self.reload(first_level_page))
+        third_level_page = create_page('level3', "nav_playground.html", "en", # nopyflakes
+                                       created_by=admin_user, published=True,
+                                       parent=second_level_page_top)
+        fourth_level_page = create_page('level23', "nav_playground.html", "en", # nopyflakes
+                                        created_by=admin_user,
+                                        parent=self.reload(first_level_page))
+        self.assertEqual(Page.objects.all().count(), 9)
+
+        url = admin_reverse('cms_%s_changelist' % Page._meta.model_name)
+
+        request = self.get_request(url)
+        request.session = {}
+        request.user = admin_user
+
+        page_admin = site._registry[Page]
+
+        # full blown page list. only draft pages are taken into account
+        cl_params = [request, page_admin.model, page_admin.list_display,
+            page_admin.list_display_links, page_admin.list_filter,
+            page_admin.date_hierarchy, page_admin.search_fields,
+            page_admin.list_select_related, page_admin.list_per_page]
+        if hasattr(page_admin, 'list_max_show_all'):  # django 1.4
+            cl_params.append(page_admin.list_max_show_all)
+        cl_params.extend([page_admin.list_editable, page_admin])
+        cl = CMSChangeList(*tuple(cl_params))
+        cl.get_results(request)
+        self.assertEqual(cl.full_result_count, 5)
+        self.assertEqual(cl.result_count, 5)
+
+        # only one unpublished page is returned
+        request = self.get_request(url+'?q=level23')
+        request.session = {}
+        request.user = admin_user
+        cl_params[0] = request
+        cl = CMSChangeList(*tuple(cl_params))
+        cl.get_results(request)
+        self.assertEqual(cl.full_result_count, 5)
+        self.assertEqual(cl.result_count, 1)
+
+        # a number of pages matches the query
+        request = self.get_request(url+'?q=level2')
+        request.session = {}
+        request.user = admin_user
+        cl_params[0] = request
+        cl = CMSChangeList(*tuple(cl_params))
+        cl.get_results(request)
+        self.assertEqual(cl.full_result_count, 5)
+        self.assertEqual(cl.result_count, 3)
 
     def test_changelist_tree(self):
         """ This test checks for proper jstree cookie unquoting.
@@ -646,14 +714,14 @@ class AdminTests(AdminTestsBase):
         with self.login_user_context(permless):
             request = self.get_request()
             response = self.admin_class.publish_page(request, page.pk, "en")
-            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.status_code, 405)
             page = self.reload(page)
             self.assertFalse(page.is_published('en'))
 
             request = self.get_request(post_data={'no': 'data'})
             response = self.admin_class.publish_page(request, page.pk, "en")
-            # Forbidden
             self.assertEqual(response.status_code, 403)
+            page = self.reload(page)
             self.assertFalse(page.is_published('en'))
 
         admin_user = self.get_admin()
@@ -688,6 +756,10 @@ class AdminTests(AdminTestsBase):
         admin_user = self.get_admin()
         with self.login_user_context(permless):
             request = self.get_request()
+            response = self.admin_class.change_innavigation(request, page.pk)
+            self.assertEqual(response.status_code, 405)
+        with self.login_user_context(permless):
+            request = self.get_request(post_data={'no': 'data'})
             response = self.admin_class.change_innavigation(request, page.pk)
             self.assertEqual(response.status_code, 403)
         with self.login_user_context(permless):
@@ -748,7 +820,7 @@ class AdminTests(AdminTestsBase):
         admin_user = self.get_admin()
         self.page.publish("en")  # Ensure public copy exists before reverting
         with self.login_user_context(admin_user):
-            response = self.client.get(admin_reverse('cms_page_revert_page', args=(self.page.pk, 'en')))
+            response = self.client.post(admin_reverse('cms_page_revert_page', args=(self.page.pk, 'en')))
             self.assertEqual(response.status_code, 302)
             url = response['Location']
             self.assertTrue(url.endswith('?%s' % get_cms_setting('CMS_TOOLBAR_URL__EDIT_OFF')))
@@ -1240,7 +1312,7 @@ class PluginPermissionTests(AdminTestsBase):
         page_permission = PagePermission.objects.create(
             can_change_permissions=True, user=user, page=page)
         request = self._get_change_page_request(user, page)
-        page_admin = PageAdmin(Page, None)
+        page_admin = PageAdmin(Page, AdminSite())
         page_admin._current_page = page
         # user has can_change_permission
         # => must see the PagePermissionInline
@@ -1253,7 +1325,7 @@ class PluginPermissionTests(AdminTestsBase):
         page_permission.can_change_permissions = False
         page_permission.save()
         request = self._get_change_page_request(user, page)
-        page_admin = PageAdmin(Page, None)
+        page_admin = PageAdmin(Page, AdminSite())
         page_admin._current_page = page
         # => PagePermissionInline is no longer visible
         self.assertFalse(
@@ -1650,7 +1722,12 @@ class AdminPageEditContentSizeTests(AdminTestsBase):
                 # expect that the pagesize gets influenced by the useramount of the system
                 self.assertTrue(page_size_grown, "Page size has not grown after user creation")
                 # usernames are only 2 times in content
-                text = smart_str(response.content, response._charset)
+                if DJANGO_1_7:
+                    charset = response._charset
+                else:
+                    charset = response.charset
+
+                text = smart_str(response.content, charset)
 
                 foundcount = text.count(USER_NAME)
                 # 2 forms contain usernames as options

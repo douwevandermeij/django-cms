@@ -904,6 +904,35 @@ Example::
 .. _django-reversion: https://github.com/etianen/django-reversion
 .. _unihandecode.js: https://github.com/ojii/unihandecode.js
 
+
+CMS_TOOLBAR_ANONYMOUS_ON
+========================
+
+default
+    ``True``
+
+This setting controls if anonymous users can see the CMS toolbar with
+a login form when ``?edit`` is appended to a URL. The default behaviour
+is to show the toolbar to anonymous users.
+
+
+CMS_TOOLBAR_HIDE
+================
+
+default
+    ``False``
+
+If True, the toolbar is hidden in the pages out django CMS.
+To determine the internal url of django cms, you need to assign CMS_APP_NAME to use when you include ``'cms.urls'``
+
+Example::
+
+    urlpatterns += i18n_patterns('',
+        url(r'^admin/', include(admin.site.urls)),
+        url(r'^content/', include('cms.urls', app_name=settings.CMS_APP_NAME)),
+    )
+
+
 CMS_DEFAULT_X_FRAME_OPTIONS
 ===========================
 
@@ -917,4 +946,22 @@ This should be an integer preferably taken from the Page object e.g.
 - X_FRAME_OPTIONS_ALLOW
 - X_FRAME_OPTIONS_SAMEORIGIN
 - X_FRAME_OPTIONS_DENY
+
+
+CMS_TOOLBAR_SIMPLE_STRUCTURE_MODE
+=================================
+
+default:
+    ``False``
+
+Enable or disable the absolute positioning within the structure board.
+
+By default the absolute positioned board is activated. Setting this attribute
+to ``False`` will prevent the absolute positioning and order the placeholders
+beneath each other. Static placeholders have a visual gap in the simple mode.
+
+
+Example::
+
+    CMS_TOOLBAR_SIMPLE_STRUCTURE_MODE = True
 

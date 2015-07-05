@@ -174,6 +174,7 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
             page = None
             if request:
                 page = request.current_page
+            plugin.cms_plugin_instance = instance
             context['allowed_child_classes'] = plugin.get_child_classes(placeholder_slot, page)
             if plugin.render_plugin:
                 template = plugin._get_render_template(context, instance, placeholder)
@@ -231,8 +232,9 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
                 self.parent.add_child(instance=self)
             else:
                 if not self.position and not self.position == 0:
-                    self.position == CMSPlugin.objects.filter(parent__isnull=True,
-                                                              placeholder_id=self.placeholder_id).count()
+                    self.position = CMSPlugin.objects.filter(parent__isnull=True,
+                                                             language=self.language,
+                                                             placeholder_id=self.placeholder_id).count()
                 self.add_root(instance=self)
             return
         super(CMSPlugin, self).save()
@@ -242,6 +244,16 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
 
     def move(self, target, pos=None):
         super(CMSPlugin, self).move(target, pos)
+        self = self.reload()
+        try:
+            new_pos = max(CMSPlugin.objects.filter(parent_id=self.parent_id,
+                                                   placeholder_id=self.placeholder_id,
+                                                   language=self.language).exclude(pk=self.pk).order_by('depth', 'path').values_list('position', flat=True)) + 1
+        except ValueError:
+            # This is the first plugin in the set
+            new_pos = 0
+        self.position = new_pos
+        self.save()
         return self.reload()
 
     def set_base_attr(self, plugin):
@@ -372,18 +384,7 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
 
         model = self.placeholder._get_attached_model() or Page
         breadcrumb = []
-        if not self.parent_id:
-            try:
-                url = force_text(
-                    admin_reverse("%s_%s_edit_plugin" % (model._meta.app_label, model._meta.model_name),
-                                  args=[self.pk]))
-            except NoReverseMatch:
-                url = force_text(
-                    admin_reverse("%s_%s_edit_plugin" % (Page._meta.app_label, Page._meta.model_name),
-                                  args=[self.pk]))
-            breadcrumb.append({'title': force_text(self.get_plugin_name()), 'url': url})
-            return breadcrumb
-        for parent in self.get_ancestors().reverse():
+        for parent in self.get_ancestors():
             try:
                 url = force_text(
                     admin_reverse("%s_%s_edit_plugin" % (model._meta.app_label, model._meta.model_name),
@@ -393,6 +394,15 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
                     admin_reverse("%s_%s_edit_plugin" % (Page._meta.app_label, Page._meta.model_name),
                                   args=[parent.pk]))
             breadcrumb.append({'title': force_text(parent.get_plugin_name()), 'url': url})
+        try:
+            url = force_text(
+                admin_reverse("%s_%s_edit_plugin" % (model._meta.app_label, model._meta.model_name),
+                              args=[self.pk]))
+        except NoReverseMatch:
+            url = force_text(
+                admin_reverse("%s_%s_edit_plugin" % (Page._meta.app_label, Page._meta.model_name),
+                              args=[self.pk]))
+        breadcrumb.append({'title': force_text(self.get_plugin_name()), 'url': url})
         return breadcrumb
 
     def get_breadcrumb_json(self):

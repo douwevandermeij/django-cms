@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-from django.conf import settings
+from cms.utils.compat import DJANGO_1_7
 from django.contrib import admin
+from django.contrib.auth import get_permission_codename
 from django.db import models
 from django.template.defaultfilters import title
-from django.utils.encoding import force_text, python_2_unicode_compatible
-from django.utils.timezone import get_current_timezone_name
+from django.utils.encoding import python_2_unicode_compatible
 from django.utils.translation import ugettext_lazy as _
 
 from cms.exceptions import LanguageError
-from cms.utils import get_cms_setting
 from cms.utils.helpers import reversion_register
 from cms.utils.i18n import get_language_object
 from cms.utils.placeholder import PlaceholderNoAction, get_placeholder_conf
@@ -83,13 +82,6 @@ class Placeholder(models.Model):
         from cms.plugin_pool import plugin_pool
         return plugin_pool.get_extra_placeholder_menu_items(self)
 
-    def get_cache_key(self, lang):
-        cache_key = '%srender_placeholder:%s.%s' % (get_cms_setting("CACHE_PREFIX"), self.pk, str(lang))
-        if settings.USE_TZ:
-            tz_name = force_text(get_current_timezone_name(), errors='ignore')
-            cache_key += '.%s' % tz_name.encode('ascii', 'ignore').decode('ascii').replace(' ', '_')
-        return cache_key
-
     def _get_url(self, key, pk=None):
         model = self._get_attached_model()
         args = []
@@ -119,8 +111,7 @@ class Placeholder(models.Model):
         if not getattr(request, 'user', None):
             return False
         opts = obj._meta
-        perm_accessor = getattr(opts, 'get_%s_permission' % key)
-        perm_code = '%s.%s' % (opts.app_label, perm_accessor())
+        perm_code = '%s.%s' % (opts.app_label, get_permission_codename(key, opts))
         return request.user.has_perm(perm_code) or request.user.has_perm(perm_code, obj)
 
     def has_change_permission(self, request):
@@ -141,7 +132,7 @@ class Placeholder(models.Model):
             return '<!-- missing request -->'
         width = width or self.default_width
         if width:
-            context.update({'width': width})
+            context['width'] = width
         return render_placeholder(self, context, lang=lang, editable=editable,
                                   use_cache=use_cache)
 
@@ -156,7 +147,11 @@ class Placeholder(models.Model):
                 if issubclass(rel.model, CMSPlugin):
                     continue
                 from cms.admin.placeholderadmin import PlaceholderAdminMixin
-                if rel.model in admin.site._registry and isinstance(admin.site._registry[rel.model], PlaceholderAdminMixin):
+                if DJANGO_1_7:
+                    parent = rel.model
+                else:
+                    parent = rel.related_model
+                if parent in admin.site._registry and isinstance(admin.site._registry[parent], PlaceholderAdminMixin):
                     field = getattr(self, rel.get_accessor_name())
                     try:
                         if field.count():
@@ -172,13 +167,21 @@ class Placeholder(models.Model):
             relations = self._meta.get_all_related_objects()
 
             for rel in relations:
-                if rel.model == Page or rel.model == StaticPlaceholder:
+                if DJANGO_1_7:
+                    parent = rel.model
+                else:
+                    parent = rel.related_model
+                if parent == Page or parent == StaticPlaceholder:
                     relations.insert(0, relations.pop(relations.index(rel)))
             for rel in relations:
                 if issubclass(rel.model, CMSPlugin):
                     continue
                 from cms.admin.placeholderadmin import PlaceholderAdminMixin
-                if rel.model in admin.site._registry and isinstance(admin.site._registry[rel.model], PlaceholderAdminMixin):
+                if DJANGO_1_7:
+                    parent = rel.model
+                else:
+                    parent = rel.related_model
+                if parent in admin.site._registry and isinstance(admin.site._registry[parent], PlaceholderAdminMixin):
                     field = getattr(self, rel.get_accessor_name())
                     try:
                         if field.count():

@@ -9,8 +9,8 @@ from django.http import Http404, HttpResponseRedirect
 from django.test.utils import override_settings
 
 from cms.api import create_page, create_title, publish_page, add_plugin
-from cms.exceptions import LanguageError
 from cms.forms.utils import update_site_and_page_choices
+from cms.exceptions import LanguageError
 from cms.menu import CMSMenu
 from cms.models import Title, EmptyTitle
 from cms.test_utils.testcases import (CMSTestCase,
@@ -125,7 +125,6 @@ class MultilingualTestCase(CMSTestCase):
             self.assertEqual(page.get_slug(fallback=False), page_data['slug'])
             self.assertEqual(page.get_title(fallback=False), page_data['title'])
 
-
     def test_multilingual_page(self):
         TESTLANG = get_primary_lanaguage()
         TESTLANG2 = get_secondary_lanaguage()
@@ -214,7 +213,6 @@ class MultilingualTestCase(CMSTestCase):
             self.client.logout()
             response = self.client.get("/en/page4/")
             self.assertEqual(response.status_code, 404)
-
 
     def test_detail_view_404_when_no_language_is_found(self):
         page = create_page("page1", "nav_playground.html", "en")

@@ -1,19 +1,16 @@
 # -*- coding: utf-8 -*-
 from __future__ import with_statement
 import datetime
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from cms.exceptions import PublicIsUnmodifiable, PublicVersionNeeded
-from cms.test_utils.compat import skipIf
-from cms.utils.i18n import force_language
 import os.path
 
 from django.conf import settings
 from django.core.cache import cache
-from django.contrib.sites.models import Site
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.sites.models import Site
 from django.core.exceptions import ValidationError
 from django.core.urlresolvers import reverse
+from django.db import transaction
 from django.db.models import signals
 from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
 from django.test.utils import override_settings
@@ -23,7 +20,8 @@ from django.utils.timezone import now as tz_now, make_aware, get_current_timezon
 from cms import constants
 from cms.admin.forms import AdvancedSettingsForm
 from cms.admin.pageadmin import PageAdmin
-from cms.api import create_page, add_plugin
+from cms.api import create_page, add_plugin, create_title, publish_page
+from cms.exceptions import PublicIsUnmodifiable, PublicVersionNeeded
 from cms.middleware.user import CurrentUserMiddleware
 from cms.models import Page, Title, EmptyTitle
 from cms.models.placeholdermodel import Placeholder
@@ -31,10 +29,13 @@ from cms.models.pluginmodel import CMSPlugin
 from cms.signals import pre_save_page, post_save_page
 from cms.sitemaps import CMSSitemap
 from cms.templatetags.cms_tags import get_placeholder_content
+from cms.test_utils.compat import skipIf
 from cms.test_utils.testcases import (CMSTestCase, URL_CMS_PAGE, URL_CMS_PAGE_ADD)
 from cms.test_utils.util.context_managers import LanguageOverride, UserLoginContext
 from cms.utils import get_cms_setting
+from cms.utils.compat import DJANGO_1_7
 from cms.utils.compat.dj import installed_apps
+from cms.utils.i18n import force_language
 from cms.utils.page_resolver import get_page_from_request, is_valid_url
 from cms.utils.page import is_valid_page_slug, get_available_slug
 from cms.utils.urlutils import admin_reverse
@@ -51,8 +52,10 @@ class PageMigrationTestCase(CMSTestCase):
         Test correct content type is set for Page object
         """
         from django.contrib.contenttypes.models import ContentType
-        self.assertFalse(ContentType.objects.filter(model='page', name='', app_label='cms').exists())
-        self.assertTrue(ContentType.objects.filter(model='page', name='page', app_label='cms').exists())
+        if DJANGO_1_7:
+            # obsolete test for an old bug, can be dropped at any time
+            self.assertFalse(ContentType.objects.filter(model='page', name='', app_label='cms').exists())
+        self.assertEqual(ContentType.objects.filter(model='page', app_label='cms').count(), 1)
 
 
 def has_no_custom_user():
@@ -71,6 +74,23 @@ class PagesTestCase(CMSTestCase):
         with self.login_user_context(superuser):
             response = self.client.get(URL_CMS_PAGE_ADD)
             self.assertEqual(response.status_code, 200)
+
+    def test_absolute_url(self):
+        user = self.get_superuser()
+        page = create_page("page", "nav_playground.html", "en", published=True)
+        create_title("fr", "french home", page)
+        page_2 = create_page("inner", "nav_playground.html", "en", published=True, parent=page)
+        create_title("fr", "french inner", page_2)
+        publish_page(page_2, user, "fr")
+
+        self.assertEqual(page_2.get_absolute_url(), '/en/inner/')
+        self.assertEqual(page_2.get_absolute_url(language='en'), '/en/inner/')
+        self.assertEqual(page_2.get_absolute_url(language='fr'), '/fr/french-inner/')
+
+        with force_language('fr'):
+            self.assertEqual(page_2.get_absolute_url(), '/fr/french-inner/')
+            self.assertEqual(page_2.get_absolute_url(language='en'), '/en/inner/')
+            self.assertEqual(page_2.get_absolute_url(language='fr'), '/fr/french-inner/')
 
     def test_create_page_admin(self):
         """
@@ -660,7 +680,10 @@ class PagesTestCase(CMSTestCase):
         url = page.get_absolute_url()
         response = self.client.get(url)
         self.assertEqual(200, response.status_code)
-        path = os.path.join(settings.TEMPLATE_DIRS[0], 'add_placeholder.html')
+        try:
+            path = os.path.join(settings.TEMPLATE_DIRS[0], 'add_placeholder.html')
+        except IndexError:
+            path = os.path.join(settings.TEMPLATES[0]['DIRS'][0], 'add_placeholder.html')
         with open(path, 'r') as fobj:
             old = fobj.read()
         try:
@@ -1046,9 +1069,6 @@ class PagesTestCase(CMSTestCase):
                 for j in range(5):
                     add_plugin(placeholder, TextPlugin, 'en', body='text-%d-%d' % (i, j))
                     add_plugin(placeholder, LinkPlugin, 'en', name='link-%d-%d' % (i, j))
-            from django.db import connection
-
-            connection.queries = []
 
             # trigger the apphook query so that it doesn't get in our way
             reverse('pages-root')
@@ -1127,6 +1147,13 @@ class PagesTestCase(CMSTestCase):
 
         resp = self.client.get(page.get_absolute_url('en'))
         self.assertEqual(resp.get('X-Frame-Options'), 'DENY')
+
+    def test_top_level_page_inherited_xframe_options_are_applied(self):
+        with self.settings(MIDDLEWARE_CLASSES=settings.MIDDLEWARE_CLASSES + ['django.middleware.clickjacking.XFrameOptionsMiddleware']):
+            page = create_page('test page 1', 'nav_playground.html', 'en',
+                               published=True)
+            resp = self.client.get(page.get_absolute_url('en'))
+            self.assertEqual(resp.get('X-Frame-Options'), 'SAMEORIGIN')
 
 class PageAdminTestBase(CMSTestCase):
     """

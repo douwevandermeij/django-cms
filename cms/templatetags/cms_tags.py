@@ -1,46 +1,57 @@
 # -*- coding: utf-8 -*-
-from copy import copy
 from datetime import datetime
 from itertools import chain
-from django.utils.six import string_types
-import re
-from classytags.values import StringValue
-from django.db.models import Model
-from cms.utils.urlutils import admin_reverse
+
+from copy import copy
+
+try:
+    from collections import OrderedDict
+except ImportError:
+    from django.utils.datastructures import SortedDict as OrderedDict
 
 from django import template
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.mail import mail_managers
 from django.core.urlresolvers import reverse
+from django.db.models import Model
+from django.middleware.common import BrokenLinkEmailsMiddleware
 from django.template.defaultfilters import safe
 from django.template.loader import render_to_string
 from django.utils import six
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_text, force_text
 from django.utils.html import escape
 from django.utils.http import urlencode
 from django.utils.safestring import mark_safe
+from django.utils.six import string_types
 from django.utils.translation import ugettext_lazy as _, get_language
-from classytags.arguments import Argument, MultiValueArgument, \
-    MultiKeywordArgument
+
+from classytags.arguments import (Argument, MultiValueArgument,
+                                  MultiKeywordArgument)
 from classytags.core import Options, Tag
 from classytags.helpers import InclusionTag, AsTag
 from classytags.parser import Parser
+from classytags.values import StringValue
 from sekizai.helpers import Watcher
 from sekizai.templatetags.sekizai_tags import SekizaiParser, RenderBlock
 
 from cms import __version__
+from cms.cache.page import get_page_url_cache, set_page_url_cache
+from cms.cache.placeholder import (get_placeholder_page_cache, set_placeholder_page_cache,
+                                   get_placeholder_cache)
 from cms.exceptions import PlaceholderNotFound
 from cms.models import Page, Placeholder as PlaceholderModel, CMSPlugin, StaticPlaceholder
 from cms.plugin_pool import plugin_pool
 from cms.plugin_rendering import render_placeholder
 from cms.utils.plugins import get_plugins, assign_plugins
 from cms.utils import get_language_from_request, get_site_id
+from cms.utils.compat import DJANGO_1_7
 from cms.utils.conf import get_cms_setting
 from cms.utils.i18n import force_language
 from cms.utils.moderator import use_draft
 from cms.utils.page_resolver import get_page_queryset
 from cms.utils.placeholder import validate_placeholder_name, get_toolbar_plugin_struct, restore_sekizai_context
+from cms.utils.urlutils import admin_reverse
 
 
 register = template.Library()
@@ -51,21 +62,6 @@ def has_permission(page, request):
 
 
 register.filter(has_permission)
-
-CLEAN_KEY_PATTERN = re.compile(r'[^a-zA-Z0-9_-]')
-
-
-def _clean_key(key):
-    return CLEAN_KEY_PATTERN.sub('-', key)
-
-
-def _get_cache_key(name, page_lookup, lang, site_id):
-    if isinstance(page_lookup, Page):
-        page_key = str(page_lookup.pk)
-    else:
-        page_key = str(page_lookup)
-    page_key = _clean_key(page_key)
-    return get_cms_setting('CACHE_PREFIX') + name + '__page_lookup:' + page_key + '_site:' + str(site_id) + '_lang:' + str(lang)
 
 
 def _get_page_by_untyped_arg(page_lookup, request, site_id):
@@ -115,9 +111,17 @@ def _get_page_by_untyped_arg(page_lookup, request, site_id):
         if settings.DEBUG:
             raise Page.DoesNotExist(body)
         else:
-            if settings.SEND_BROKEN_LINK_EMAILS:
+            if getattr(settings, 'SEND_BROKEN_LINK_EMAILS', False):
                 mail_managers(subject, body, fail_silently=True)
+            elif 'django.middleware.common.BrokenLinkEmailsMiddleware' in settings.MIDDLEWARE_CLASSES:
+                middle = BrokenLinkEmailsMiddleware()
+                domain = request.get_host()
+                path = request.get_full_path()
+                referer = force_text(request.META.get('HTTP_REFERER', ''), errors='replace')
+                if not middle.is_ignorable_request(request, path, domain, referer):
+                    mail_managers(subject, body, fail_silently=True)
             return None
+
 
 class PageUrl(AsTag):
     name = 'page_url'
@@ -146,7 +150,6 @@ class PageUrl(AsTag):
             return ''
 
     def get_value(self, context, page_lookup, lang, site):
-        from django.core.cache import cache
 
         site_id = get_site_id(site)
         request = context.get('request', False)
@@ -157,17 +160,12 @@ class PageUrl(AsTag):
         if lang is None:
             lang = get_language_from_request(request)
 
-        cache_key = _get_cache_key('page_url', page_lookup, lang, site_id) + \
-            '_type:absolute_url'
-
-        url = cache.get(cache_key)
-
-        if not url:
+        url = get_page_url_cache(page_lookup, lang, site_id)
+        if url is None:
             page = _get_page_by_untyped_arg(page_lookup, request, site_id)
             if page:
                 url = page.get_absolute_url(language=lang)
-                cache.set(cache_key, url,
-                          get_cms_setting('CACHE_DURATIONS')['content'])
+                set_page_url_cache(page_lookup, lang, site_id, url)
         if url:
             return url
         return ''
@@ -178,7 +176,6 @@ register.tag('page_id_url', PageUrl)
 
 
 def _get_placeholder(current_page, page, context, name):
-    from django.core.cache import cache
     placeholder_cache = getattr(current_page, '_tmp_placeholders_cache', {})
     if page.pk in placeholder_cache:
         placeholder = placeholder_cache[page.pk].get(name, None)
@@ -192,9 +189,8 @@ def _get_placeholder(current_page, page, context, name):
         fetch_placeholders = placeholders
     else:
         for placeholder in placeholders:
-            cache_key = placeholder.get_cache_key(get_language())
-            cached_value = cache.get(cache_key)
-            if not cached_value is None:
+            cached_value = get_placeholder_cache(placeholder, get_language())
+            if cached_value is not None:
                 restore_sekizai_context(context, cached_value['sekizai'])
                 placeholder.content_cache = cached_value['content']
             else:
@@ -214,7 +210,6 @@ def _get_placeholder(current_page, page, context, name):
 
 
 def get_placeholder_content(context, request, current_page, name, inherit, default):
-    from django.core.cache import cache
     edit_mode = getattr(request, 'toolbar', None) and getattr(request.toolbar, 'edit_mode')
     pages = [current_page]
     # don't display inherited plugins in edit mode, so that the user doesn't
@@ -230,9 +225,8 @@ def get_placeholder_content(context, request, current_page, name, inherit, defau
             if hasattr(placeholder, 'content_cache'):
                 return mark_safe(placeholder.content_cache)
             if not hasattr(placeholder, 'cache_checked'):
-                cache_key = placeholder.get_cache_key(get_language())
-                cached_value = cache.get(cache_key)
-                if not cached_value is None:
+                cached_value = get_placeholder_cache(placeholder, get_language())
+                if cached_value is not None:
                     restore_sekizai_context(context, cached_value['sekizai'])
                     return mark_safe(cached_value['content'])
         if not get_plugins(request, placeholder, page.get_template()):
@@ -413,6 +407,7 @@ class PluginChildClasses(InclusionTag):
             plugin_class = plugin.get_plugin_class()
             if plugin_class.allow_children:
                 instance, plugin = plugin.get_plugin_instance()
+                plugin.cms_plugin_instance = instance
                 childs = [plugin_pool.get_plugin(cls) for cls in plugin.get_child_classes(slot, page)]
                 # Builds the list of dictionaries containing module, name and value for the plugin dropdowns
                 child_plugin_classes = get_toolbar_plugin_struct(childs, slot, page, parent=plugin_class)
@@ -560,10 +555,13 @@ def _show_placeholder_for_page(context, placeholder_name, page_lookup, lang=None
     See _get_page_by_untyped_arg() for detailed information on the allowed types
     and their interpretation for the page_lookup argument.
     """
-    from django.core.cache import cache
     validate_placeholder_name(placeholder_name)
 
-    request = context.get('request', False)
+    if DJANGO_1_7:
+        request = context.get('request', False)
+    else:
+        request = context.request
+
     site_id = get_site_id(site)
 
     if not request:
@@ -572,9 +570,7 @@ def _show_placeholder_for_page(context, placeholder_name, page_lookup, lang=None
         lang = get_language_from_request(request)
 
     if cache_result:
-        base_key = _get_cache_key('_show_placeholder_for_page', page_lookup, lang, site_id)
-        cache_key = _clean_key('%s_placeholder:%s' % (base_key, placeholder_name))
-        cached_value = cache.get(cache_key)
+        cached_value = get_placeholder_page_cache(page_lookup, lang, site_id, placeholder_name)
         if cached_value:
             restore_sekizai_context(context, cached_value['sekizai'])
             return {'content': mark_safe(cached_value['content'])}
@@ -591,7 +587,8 @@ def _show_placeholder_for_page(context, placeholder_name, page_lookup, lang=None
     content = render_placeholder(placeholder, context, placeholder_name, use_cache=cache_result)
     changes = watcher.get_changes()
     if cache_result:
-        cache.set(cache_key, {'content': content, 'sekizai': changes}, get_cms_setting('CACHE_DURATIONS')['content'])
+        set_placeholder_page_cache(page_lookup, lang, site_id, placeholder_name,
+                                   {'content': content, 'sekizai': changes})
 
     if content:
         return {'content': mark_safe(content)}
@@ -660,13 +657,13 @@ class CMSToolbar(RenderBlock):
             toolbar.populate()
         if request and 'cms-toolbar-login-error' in request.GET:
             context['cms_toolbar_login_error'] = request.GET['cms-toolbar-login-error'] == '1'
-        context['cms_version'] = __version__
+        context['cms_version'] =  __version__
         if toolbar and toolbar.show_toolbar:
             language = toolbar.toolbar_language
             with force_language(language):
                 # needed to populate the context with sekizai content
                 render_to_string('cms/toolbar/toolbar_javascript.html', context)
-                context['addons'] = mark_safe(toolbar.render_addons(context))
+                context['addons'] =  mark_safe(toolbar.render_addons(context))
         else:
             language = None
         # render everything below the tag
@@ -896,8 +893,9 @@ class CMSEditableObject(InclusionTag):
                 edit_fields = 'title,page_title,menu_title'
             view_url = 'admin:cms_page_edit_title_fields'
         if edit_fields == 'changelist':
-            view_url = 'admin:cms_page_changelist'
-        querystring = {'language': language}
+            view_url = 'admin:%s_%s_changelist' % (
+                instance._meta.app_label, instance._meta.model_name)
+        querystring = OrderedDict((('language', language),))
         if edit_fields:
             extra_context['edit_fields'] = edit_fields.strip().split(",")
         # If the toolbar is not enabled the following part is just skipped: it
@@ -1174,6 +1172,7 @@ class RenderPlaceholder(AsTag):
             request.placeholders = []
         if placeholder.has_change_permission(request):
             request.placeholders.append(placeholder)
+        context = context.new(context)
         return safe(placeholder.render(context, width, lang=language,
                                        editable=editable, use_cache=not nocache))
 

@@ -107,8 +107,17 @@ $(document).ready(function () {
 					if(!that.toolbar.find('.cms_toolbar-item-cms-mode-switcher').length) return false;
 					e.preventDefault();
 					that.show();
+				} else if(e.keyCode === 16) {
+					$(this).data('expandmode', true);
 				}
 			});
+
+			$(document).bind('keyup', function (e) {
+				if(e.keyCode === 16) {
+					$(this).data('expandmode', false);
+				}
+			});
+
 		},
 
 		// public methods
@@ -286,10 +295,25 @@ $(document).ready(function () {
 			this.placeholders.show();
 
 			// attach event
-			$(window).bind('resize.sideframe', function () {
-				that._resizeBoard();
-			}).trigger('resize.sideframe');
-
+			if (CMS.config.simpleStructureBoard) {
+				var content = $('.cms_structure-content');
+				var areas = content.find('.cms_dragarea');
+				// set correct css attributes for the new mode
+				content.addClass('cms_structure-content-simple');
+				areas.addClass('cms_dragarea-simple');
+				// lets reorder placeholders
+				areas.each(function (index, item) {
+					if ($(item).hasClass('cms_dragarea-static')) {
+						content.append(item)
+					}
+				});
+				// now lets get the first instance and add some padding
+				areas.filter('.cms_dragarea-static').eq(0).css('margin-top', '50px');
+			} else {
+				$(window).bind('resize.sideframe', function () {
+					that._resizeBoard();
+				}).trigger('resize.sideframe');
+			}
 		},
 
 		_hideBoard: function () {
@@ -353,7 +377,7 @@ $(document).ready(function () {
 				'dropOnEmpty': true,
 				'forcePlaceholderSize': true,
 				'helper': 'clone',
-				'appendTo': 'body',
+				'appendTo': '.cms_structure-content',
 				'cursor': 'move',
 				'opacity': 0.4,
 				'zIndex': 9999999,
@@ -381,6 +405,11 @@ $(document).ready(function () {
 						if($(this).children().length === 0) {
 							$(this).show();
 						}
+					});
+					// add overflow hidden to body
+					$('.cms_structure-content').css({
+						'height': $(document).height(),
+						'overflow': 'hidden'
 					});
 				},
 
@@ -415,6 +444,12 @@ $(document).ready(function () {
 						if($(this).children().length === 0) {
 							$(this).hide();
 						}
+					});
+
+					// add overflow hidden to body
+					$('.cms_structure-content').css({
+						'height': '',
+						'overflow': ''
 					});
 				},
 				'isAllowed': function(placeholder, placeholderParent, originalItem) {

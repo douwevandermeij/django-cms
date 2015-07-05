@@ -43,12 +43,20 @@ Create a new directory to work in, and cd into it::
 
 Run it to create a new Django project called ``mysite``::
 
-    djangocms -p . mysite
+    djangocms -p -f . mysite
 
-.. warning:: djangocms-installer expects directory ``.`` to be empty at this stage, and will
-             check for this, and will warn if it's not.
-             You can get it to skip the check and go ahead anyway using  the ``-s`` flag;
-             **note that this may overwrite existing files**.
+.. note::
+   The ``-f`` flag tells the installer to install and configure Django Filer, a useful application
+   for managing files and processing images. Although it's not required for django CMS itself, a
+   vast number of django CMS addons use it, and nearly all django CMS projects have it installed.
+   If you know you won't need it, omit the flag. See the `django CMS installer documentation for
+   more information <http://djangocms-installer.readthedocs.org>`_.
+
+
+.. warning::
+   djangocms-installer expects directory ``.`` to be empty at this stage, and will check for this,
+   and will warn if it's not. You can get it to skip the check and go ahead anyway using the ``-s``
+   flag; **note that this may overwrite existing files**.
 
 
 Windows users may need to do a little extra to make sure Python files are associated correctly if that doesn't work right away::
@@ -63,7 +71,7 @@ default, they're highlighted below:
 
 * Database configuration (in URL format): sqlite://localhost/project.db
 * django CMS version: stable
-* Django version: **1.6**
+* Django version: stable
 * Activate Django I18N / L10N setting: yes
 * Install and configure reversion support: yes
 * Languages to enable. Option can be provided multiple times, or as a comma separated list: **en, de**

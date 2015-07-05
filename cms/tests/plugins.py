@@ -244,6 +244,28 @@ class PluginsTestCase(PluginsTestBaseCase):
             rendered_live_placeholder = live_placeholder.render(self.get_context(live_page.get_absolute_url(), page=live_page), None)
             self.assertEqual(rendered_live_placeholder, "I'm the firstI'm the secondI'm the third")
 
+    def test_plugin_breadcrumbs(self):
+        """
+        Test the plugin breadcrumbs order
+        """
+        draft_page = api.create_page("home", "col_two.html", "en",
+                                     slug="page1", published=False, in_navigation=True)
+        placeholder = draft_page.placeholders.get(slot="col_left")
+
+        columns = api.add_plugin(placeholder, "MultiColumnPlugin", "en")
+        column = api.add_plugin(placeholder, "ColumnPlugin", "en", target=columns, width='10%')
+        text_plugin = api.add_plugin(placeholder, "TextPlugin", "en", target=column, body="I'm the second")
+        text_breadcrumbs = text_plugin.get_breadcrumb()
+        self.assertEqual(len(columns.get_breadcrumb()), 1)
+        self.assertEqual(len(column.get_breadcrumb()), 2)
+        self.assertEqual(len(text_breadcrumbs), 3)
+        self.assertTrue(text_breadcrumbs[0]['title'], columns.get_plugin_class().name)
+        self.assertTrue(text_breadcrumbs[1]['title'], column.get_plugin_class().name)
+        self.assertTrue(text_breadcrumbs[2]['title'], text_plugin.get_plugin_class().name)
+        self.assertTrue('/edit-plugin/%s/'% columns.pk in text_breadcrumbs[0]['url'])
+        self.assertTrue('/edit-plugin/%s/'% column.pk, text_breadcrumbs[1]['url'])
+        self.assertTrue('/edit-plugin/%s/'% text_plugin.pk, text_breadcrumbs[2]['url'])
+
     def test_add_cancel_plugin(self):
         """
         Test that you can cancel a new plugin before editing and
@@ -423,6 +445,29 @@ class PluginsTestCase(PluginsTestBaseCase):
                 self.assertTrue('link.png' in new_plugins[idx].body)
                 self.assertTrue('plugin_obj_%s' % new_plugins[idx].get_children()[0].pk in new_plugins[idx].body)
 
+    def test_plugin_position(self):
+        page_en = api.create_page("CopyPluginTestPage (EN)", "nav_playground.html", "en")
+        placeholder = page_en.placeholders.get(slot="body")
+        placeholder_right = page_en.placeholders.get(slot="right-column")
+        columns = api.add_plugin(placeholder, "MultiColumnPlugin", "en")
+        column_1 = api.add_plugin(placeholder, "ColumnPlugin", "en", target=columns, width='10%')
+        column_2 = api.add_plugin(placeholder, "ColumnPlugin", "en", target=columns, width='30%')
+        api.add_plugin(placeholder, "TextPlugin", "en", target=column_1, body="I'm the first")
+        text_plugin = api.add_plugin(placeholder, "TextPlugin", "en", target=column_1, body="I'm the second")
+
+        returned_1 = copy_plugins_to([text_plugin], placeholder, 'en', column_1.pk)
+        returned_2 = copy_plugins_to([text_plugin], placeholder_right, 'en')
+        returned_3 = copy_plugins_to([text_plugin], placeholder, 'en', column_2.pk)
+
+        # Second plugin in the plugin branch
+        self.assertEqual(text_plugin.position, 1)
+        # Added as third plugin in the same branch as the above
+        self.assertEqual(returned_1[0][0].position, 2)
+        # First plugin in a placeholder
+        self.assertEqual(returned_2[0][0].position, 0)
+        # First plugin nested in a plugin
+        self.assertEqual(returned_3[0][0].position, 0)
+
     def test_copy_plugins(self):
         """
         Test that copying plugins works as expected.
@@ -439,7 +484,7 @@ class PluginsTestCase(PluginsTestBaseCase):
 
         # add a *nested* link plugin
         link_plugin_en = api.add_plugin(ph_en, "LinkPlugin", "en", target=text_plugin_en,
-                                    name="A Link", url="https://www.django-cms.org")
+                                        name="A Link", url="https://www.django-cms.org")
 
         # the call above to add a child makes a plugin reload required here.
         text_plugin_en = self.reload(text_plugin_en)
